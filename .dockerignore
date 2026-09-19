@@ -1,0 +1,17 @@
+node_modules
+.git
+.github
+docs
+test
+.scratch
+.gemini
+*.log
+.npm
+package.json
+package-lock.json
+eslint.config.js
+AGENTS.md
+NOTICE.md
+README.md
+Dockerfile
+.dockerignore

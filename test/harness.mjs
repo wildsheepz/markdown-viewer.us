@@ -60,6 +60,16 @@ const mime = (p) => MIME[p.slice(p.lastIndexOf("."))] || "application/octet-stre
 
 const server = http.createServer((req, res) => {
   let p = decodeURIComponent((req.url || "/").split("?")[0]);
+  if (p === "/fixtures/remote.md") {
+    res.writeHead(200, { ...H, "Content-Type": "text/markdown; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+    res.end("# Remote Markdown\n\n![diagram](./assets/diag.png)\n\n[Another doc](./sub/other.md)\n\n[External](https://example.com)\n");
+    return;
+  }
+  if (p === "/fixtures/404.md") {
+    res.writeHead(404, { ...H, "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+    res.end("Not Found");
+    return;
+  }
   if (p.endsWith("/")) p += "index.html";
   let fp = join(ROOT, p);
   if (!fp.startsWith(ROOT) || !existsSync(fp)) fp = join(ROOT, "index.html");
@@ -231,6 +241,94 @@ check("sanitizer: <iframe> does not survive", await px.evaluate(() =>
 await px.waitForTimeout(300);
 check("sanitizer: img onerror did not fire", await px.evaluate(() => window.__xssImg !== true));
 await ctxX.close();
+
+// -- #url= remote document rendering and readonly lock mode
+const ctxUrl = await browser.newContext();
+const pUrl = await ctxUrl.newPage();
+hook(pUrl);
+const remoteDocUrl = `http://localhost:${PORT}/fixtures/remote.md`;
+await pUrl.goto(`http://localhost:${PORT}/#url=${encodeURIComponent(remoteDocUrl)}`, { waitUntil: "load", timeout: 30000 });
+await pUrl.waitForFunction(() => document.body.classList.contains("viewing"), null, { timeout: 10000 });
+
+check("#url=: content renders", await pUrl.evaluate(() => {
+  const h1 = document.querySelector("#content h1");
+  return h1 && h1.textContent === "Remote Markdown";
+}));
+
+check("#url=: title derived from URL filename", await pUrl.evaluate(() => {
+  return document.getElementById("docTitle").textContent === "remote.md";
+}));
+
+check("#url=: readonly mode active on body", await pUrl.evaluate(() => {
+  return document.body.classList.contains("readonly-mode");
+}));
+
+check("#url=: Clear button is hidden in readonly mode", await pUrl.evaluate(() => {
+  const btn = document.getElementById("btnClear");
+  return getComputedStyle(btn).display === "none";
+}));
+
+check("#url=: relative image resolved to base URL", await pUrl.evaluate(() => {
+  const img = document.querySelector("#content img");
+  return img && img.getAttribute("src").startsWith("http://localhost:") && img.getAttribute("src").includes("/fixtures/assets/diag.png");
+}));
+
+check("#url=: relative markdown link rewritten to #url=", await pUrl.evaluate(() => {
+  const links = Array.from(document.querySelectorAll("#content a"));
+  const mdLink = links.find((a) => a.textContent === "Another doc");
+  return mdLink && mdLink.getAttribute("href").startsWith("#url=") && mdLink.getAttribute("href").includes("sub%2Fother.md");
+}));
+
+check("#url=: external link keeps target=_blank and rel", await pUrl.evaluate(() => {
+  const links = Array.from(document.querySelectorAll("#content a"));
+  const extLink = links.find((a) => a.textContent === "External");
+  return extLink && extLink.getAttribute("target") === "_blank" && extLink.getAttribute("rel") === "noopener noreferrer";
+}));
+
+// Test readonly mode locks out drop and paste
+await pUrl.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.setData("text", "# dropped text that should be ignored");
+  window.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+});
+check("#url=: drop ignored in readonly mode", await pUrl.evaluate(() => {
+  return !document.getElementById("content").textContent.includes("dropped text that should be ignored");
+}));
+
+await pUrl.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.setData("text", "# pasted text that should be ignored");
+  window.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+});
+check("#url=: paste ignored in readonly mode", await pUrl.evaluate(() => {
+  return !document.getElementById("content").textContent.includes("pasted text that should be ignored");
+}));
+
+await ctxUrl.close();
+
+// -- #url= error handling when URL returns 404
+const ctxErr = await browser.newContext();
+const pErr = await ctxErr.newPage();
+hook(pErr);
+await pErr.goto(`http://localhost:${PORT}/#url=${encodeURIComponent(`http://localhost:${PORT}/fixtures/404.md`)}`, { waitUntil: "load", timeout: 30000 });
+await pErr.waitForFunction(() => !document.getElementById("urlError").hidden, null, { timeout: 10000 });
+
+check("#url= 404: error card displayed", await pErr.evaluate(() => {
+  const card = document.getElementById("urlError");
+  const msg = document.getElementById("urlErrorMsg");
+  return !card.hidden && msg && msg.textContent.includes("404");
+}));
+
+// Test dismiss button returns to empty state
+await pErr.click("#urlDismissBtn");
+check("#url= error dismiss: resets to empty state and clears readonly", await pErr.evaluate(() => {
+  const empty = document.getElementById("empty");
+  const card = document.getElementById("urlError");
+  return !empty.hidden && card.hidden && !document.body.classList.contains("readonly-mode");
+}));
+
+await ctxErr.close();
+
 
 // -- static assertions
 const sz = (p) => (existsSync(join(ROOT, p)) ? statSync(join(ROOT, p)).size : 0);

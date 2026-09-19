@@ -11,9 +11,21 @@
   var themeColor= doc.getElementById("themeColor");
   var footerEl  = doc.getElementById("footer");
   var topbar    = doc.querySelector(".topbar");
+  var urlError      = doc.getElementById("urlError");
+  var urlErrorTitle = doc.getElementById("urlErrorTitle");
+  var urlErrorMsg   = doc.getElementById("urlErrorMsg");
+  var urlRetryBtn   = doc.getElementById("urlRetryBtn");
+  var urlDismissBtn = doc.getElementById("urlDismissBtn");
+  var emptyTitle    = doc.querySelector(".empty-title");
+  var emptySub      = doc.querySelector(".empty-sub");
+  var DEFAULT_EMPTY_TITLE = "Drop a Markdown file to view";
+  var DEFAULT_EMPTY_SUB   = "Drag & drop anywhere, paste, or tap to open. Accepts .md, .markdown, .mdx, .txt, .rst, .adoc.";
   var rawText   = "";
   var toastTimer = null;
   var BASE_TITLE = "Markdown Viewer";
+  var isReadonly = false;
+  var activeFetchController = null;
+  var activeUrl = "";
 
   // Accepted Markdown-family file types (other file types are handled elsewhere).
   var MD_EXT = ["md", "markdown", "mdx", "txt", "rst", "adoc"];
@@ -44,7 +56,7 @@
     history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
 
-  function render(text, title){
+  function render(text, title, docUrl){
     rawText = text;
     syncQueryName(title);             // "" from the two paste handlers — pasted text has no file
     var html = window.marked ? marked.parse(text) : text;
@@ -52,11 +64,43 @@
     content.innerHTML = html;
     var links = content.querySelectorAll('a[href]');
     for (var i = 0; i < links.length; i++){
-      links[i].setAttribute("target", "_blank");
-      links[i].setAttribute("rel", "noopener noreferrer");
+      var href = links[i].getAttribute("href") || "";
+      if (!href.startsWith("#")){
+        links[i].setAttribute("target", "_blank");
+        links[i].setAttribute("rel", "noopener noreferrer");
+      }
+    }
+    if (docUrl){
+      try {
+        var baseUrl = new URL("./", docUrl).href;
+        var imgs = content.querySelectorAll('img[src]');
+        for (var j = 0; j < imgs.length; j++){
+          var src = imgs[j].getAttribute("src");
+          if (src && !/^(?:[a-z]+:|\/\/|data:|blob:)/i.test(src)){
+            imgs[j].src = new URL(src, baseUrl).href;
+          }
+        }
+        for (var k = 0; k < links.length; k++){
+          var linkHref = links[k].getAttribute("href") || "";
+          if (linkHref && !linkHref.startsWith("#") && !/^(?:[a-z]+:|\/\/|mailto:|tel:)/i.test(linkHref)){
+            var resolved = new URL(linkHref, baseUrl).href;
+            var cleanPath = resolved.split("?")[0].split("#")[0];
+            if (isAccepted(cleanPath)){
+              links[k].setAttribute("href", "#url=" + encodeURIComponent(resolved));
+              links[k].removeAttribute("target");
+              links[k].removeAttribute("rel");
+            } else {
+              links[k].setAttribute("href", resolved);
+              links[k].setAttribute("target", "_blank");
+              links[k].setAttribute("rel", "noopener noreferrer");
+            }
+          }
+        }
+      } catch (_) {}
     }
     content.hidden = false;
     empty.hidden = true;
+    if (urlError) urlError.hidden = true;
     docTitle.textContent = title || BASE_TITLE;
     doc.title = title ? title + " — " + BASE_TITLE : BASE_TITLE;
     body.classList.add("viewing");
@@ -66,11 +110,22 @@
   }
 
   function clearAll(){
+    if (activeFetchController){
+      activeFetchController.abort();
+      activeFetchController = null;
+    }
+    activeUrl = "";
+    isReadonly = false;
+    body.classList.remove("readonly-mode");
     rawText = "";
     syncQueryName("");
     content.innerHTML = "";
     content.hidden = true;
+    if (urlError) urlError.hidden = true;
     empty.hidden = false;
+    empty.style.pointerEvents = "";
+    if (emptyTitle) emptyTitle.textContent = DEFAULT_EMPTY_TITLE;
+    if (emptySub) emptySub.textContent = DEFAULT_EMPTY_SUB;
     docTitle.textContent = BASE_TITLE;
     doc.title = BASE_TITLE;
     body.classList.remove("viewing", "header-hidden");
@@ -120,11 +175,16 @@
     doc.body.removeChild(ta);
   }
 
-  doc.getElementById("btnClear").addEventListener("click", clearAll);
+  doc.getElementById("btnClear").addEventListener("click", function(){
+    if (!isReadonly) clearAll();
+  });
 
   // Empty-state acts as an open button (great on mobile)
-  empty.addEventListener("click", openDialog);
+  empty.addEventListener("click", function(){
+    if (!isReadonly) openDialog();
+  });
   empty.addEventListener("keydown", function(e){
+    if (isReadonly) return;
     if (e.key === "Enter" || e.key === " "){ e.preventDefault(); openDialog(); }
   });
 
@@ -253,17 +313,21 @@
   var dragDepth = 0;
   function showOverlay(s){ overlay.classList.toggle("show", s); }
   window.addEventListener("dragenter", function(e){
+    if (isReadonly) return;
     if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") === -1) return;
     e.preventDefault(); dragDepth++; showOverlay(true);
   });
   window.addEventListener("dragover", function(e){
+    if (isReadonly) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
   });
   window.addEventListener("dragleave", function(e){
+    if (isReadonly) return;
     e.preventDefault(); dragDepth--; if (dragDepth <= 0){ dragDepth = 0; showOverlay(false); }
   });
   window.addEventListener("drop", function(e){
+    if (isReadonly) return;
     e.preventDefault(); dragDepth = 0; showOverlay(false);
     var dt = e.dataTransfer; if (!dt) return;
     if (dt.files && dt.files.length){ readFile(dt.files[0]); return; }
@@ -273,6 +337,7 @@
 
   // ---------- Paste to view ----------
   window.addEventListener("paste", function(e){
+    if (isReadonly) return;
     var cd = e.clipboardData || window.clipboardData;
     if (!cd) return;
     if (cd.files && cd.files.length){ e.preventDefault(); readFile(cd.files[0]); return; }
@@ -443,7 +508,6 @@
     if (window.opener){
       try { window.opener.postMessage({ type:"fv-ready" }, "*"); } catch(_){}
       window.opener = null;    // sever the reverse-navigation channel once the ping is out
-      var emptySub = doc.querySelector(".empty-sub");
       if (emptySub){
         var emptySubText = emptySub.textContent;
         emptySub.textContent = "Receiving “⁨" + fvhName + "⁩”…";
@@ -452,22 +516,167 @@
     }
   }
 
+  function rewriteRepoUrl(rawUrl){
+    if (!rawUrl) return "";
+    var url = rawUrl.trim();
+    // GitHub blob: https://github.com/:owner/:repo/blob/:ref/:path
+    var gh = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i.exec(url);
+    if (gh){
+      return "https://raw.githubusercontent.com/" + gh[1] + "/" + gh[2] + "/" + gh[3] + "/" + gh[4];
+    }
+    // GitLab blob: https://gitlab.com/:owner/:repo/-/blob/:ref/:path
+    var gl = /^https?:\/\/gitlab\.com\/([^/]+)\/([^/]+)\/-\/blob\/([^/]+)\/(.+)$/i.exec(url);
+    if (gl){
+      return "https://gitlab.com/" + gl[1] + "/" + gl[2] + "/-/raw/" + gl[3] + "/" + gl[4];
+    }
+    // Gist: https://gist.github.com/:user/:id (without /raw)
+    var gist = /^https?:\/\/gist\.github\.com\/([^/]+)\/([a-f0-9]+)(?:\/)?$/i.exec(url);
+    if (gist){
+      return "https://gist.githubusercontent.com/" + gist[1] + "/" + gist[2] + "/raw";
+    }
+    return url;
+  }
+
+  function titleFromUrl(u){
+    try {
+      var pathname = new URL(u).pathname;
+      var segs = pathname.split("/").filter(Boolean);
+      var last = segs.length ? segs[segs.length - 1] : "";
+      return decodeURIComponent(last) || BASE_TITLE;
+    } catch (_) {
+      return BASE_TITLE;
+    }
+  }
+
+  function getHashUrl(){
+    var h = location.hash || "";
+    if (h.indexOf("#url=") === 0){
+      var val = h.slice(5);
+      try { val = decodeURIComponent(val); } catch (_) {}
+      return val;
+    }
+    var m = /[#&]url=([^&]*)/.exec(h);
+    if (!m) return null;
+    var raw = m[1];
+    try { raw = decodeURIComponent(raw); } catch (_) {}
+    return raw;
+  }
+
+  function showUrlError(title, msg){
+    isReadonly = true;
+    body.classList.add("readonly-mode");
+    empty.hidden = true;
+    content.hidden = true;
+    if (urlError){
+      urlError.hidden = false;
+      if (urlErrorTitle) urlErrorTitle.textContent = title;
+      if (urlErrorMsg) urlErrorMsg.textContent = msg;
+    }
+    docTitle.textContent = "Error — " + BASE_TITLE;
+    doc.title = "Error — " + BASE_TITLE;
+  }
+
+  function loadFromUrl(targetUrl){
+    if (activeFetchController){
+      activeFetchController.abort();
+      activeFetchController = null;
+    }
+    activeUrl = targetUrl;
+    if (!targetUrl || !/^https?:\/\//i.test(targetUrl)){
+      showUrlError("Invalid URL", "Only http: and https: URLs are supported.", targetUrl);
+      return;
+    }
+    var fetchUrl = rewriteRepoUrl(targetUrl);
+    var docName = titleFromUrl(targetUrl);
+    isReadonly = true;
+    body.classList.add("readonly-mode");
+    content.hidden = true;
+    if (urlError) urlError.hidden = true;
+    empty.hidden = false;
+    empty.style.pointerEvents = "none";
+    if (emptyTitle) emptyTitle.textContent = "Fetching Markdown…";
+    if (emptySub) emptySub.textContent = "Loading “⁨" + docName + "⁩” from " + targetUrl;
+
+    var controller = new AbortController();
+    activeFetchController = controller;
+    var timeoutId = setTimeout(function(){ controller.abort(); }, 20000);
+
+    fetch(fetchUrl, { signal: controller.signal })
+      .then(function(res){
+        clearTimeout(timeoutId);
+        if (!res.ok){
+          throw new Error("HTTP " + res.status + (res.statusText ? " " + res.statusText : ""));
+        }
+        return res.text();
+      })
+      .then(function(text){
+        if (activeUrl !== targetUrl) return;
+        empty.style.pointerEvents = "";
+        render(text, docName, fetchUrl);
+      })
+      .catch(function(err){
+        clearTimeout(timeoutId);
+        if (activeUrl !== targetUrl) return;
+        empty.style.pointerEvents = "";
+        if (err.name === "AbortError"){
+          showUrlError("Request timed out", "Fetching the remote document took longer than 20 seconds.", targetUrl);
+        } else {
+          var msg = err.message || "";
+          var corsHint = "";
+          if (!msg || msg.indexOf("Failed to fetch") !== -1 || msg.indexOf("NetworkError") !== -1){
+            corsHint = " The request may have been blocked by the remote server's Cross-Origin Resource Sharing (CORS) policy, or the server is unreachable.";
+          }
+          showUrlError("Could not load Markdown", (msg ? msg + "." : "") + corsHint, targetUrl);
+        }
+      });
+  }
+
+  if (urlRetryBtn){
+    urlRetryBtn.addEventListener("click", function(){
+      if (activeUrl) loadFromUrl(activeUrl);
+    });
+  }
+  if (urlDismissBtn){
+    urlDismissBtn.addEventListener("click", function(){
+      isReadonly = false;
+      body.classList.remove("readonly-mode");
+      if (urlError) urlError.hidden = true;
+      empty.hidden = false;
+      clearAll();
+      history.replaceState(null, "", location.pathname + location.search);
+    });
+  }
+
+  window.addEventListener("hashchange", function(){
+    var u = getHashUrl();
+    if (u){
+      loadFromUrl(u);
+    } else if (isReadonly){
+      clearAll();
+    }
+  });
+
   // A bookmarked or shared link can carry the name of the file last viewed
   // (?name=, set by syncQueryName above). No content is ever recoverable
   // from a name alone -- this only labels the empty state, and it never
   // fetches or renders anything on the strength of it. Skipped when an
   // #fvh hand-off is already customizing the same element.
   if (!fvh && !rawText){
-    var qName = new URLSearchParams(location.search).get("name");
-    if (qName){
-      var lastSub = doc.querySelector(".empty-sub");
-      if (lastSub){
-        // Display-only, and it must stay that way: this string is read
-        // straight from the URL, so it is exactly as stranger-controlled as
-        // fvhName above. Note this element is NOT covered by the DOMPurify
-        // pass in render() -- that only sanitizes #content -- so textContent
-        // is the whole defense here, not a second layer behind one.
-        lastSub.textContent = "This link was shared for “⁨" + qName + "⁩”.";
+    var hashUrl = getHashUrl();
+    if (hashUrl){
+      loadFromUrl(hashUrl);
+    } else {
+      var qName = new URLSearchParams(location.search).get("name");
+      if (qName){
+        var lastSub = doc.querySelector(".empty-sub");
+        if (lastSub){
+          // Display-only, and it must stay that way: this string is read
+          // straight from the URL, so it is exactly as stranger-controlled as
+          // fvhName above. Note this element is NOT covered by the DOMPurify
+          // pass in render() -- that only sanitizes #content -- so textContent
+          // is the whole defense here, not a second layer behind one.
+          lastSub.textContent = "This link was shared for “⁨" + qName + "⁩”.";
+        }
       }
     }
   }

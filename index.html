@@ -224,6 +224,23 @@
   .route-go{ background:var(--accent); color:var(--accent-contrast); border:1px solid var(--accent) }
   .route-dismiss{ background:transparent; color:var(--text); border:1px solid var(--border) }
 
+  /* ---------- Readonly mode & URL error card ---------- */
+  body.readonly-mode #btnClear{ display:none!important }
+  .url-card{ flex:1 1 auto; display:flex; align-items:center; justify-content:center; padding:2rem 1rem; text-align:center }
+  .url-card-inner{
+    background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    box-shadow:0 12px 40px var(--shadow); padding:1.5rem 1.75rem; width:min(92vw,28rem);
+    display:flex; flex-direction:column; align-items:center; gap:.5rem;
+  }
+  .url-icon svg{ width:40px; height:40px; stroke:#e05252; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
+  .url-error-title{ font-size:1.15rem; font-weight:700; margin:0; letter-spacing:-.01em }
+  .url-error-msg{ color:var(--muted); font-size:.875rem; margin:.25rem 0 .75rem; line-height:1.45 }
+  .url-actions{ display:flex; gap:.6rem; justify-content:center }
+  .url-btn{ border-radius:9px; padding:.55rem 1rem; font:inherit; font-size:.9rem; font-weight:550; cursor:pointer; transition:background .15s ease }
+  .url-btn.primary{ background:var(--accent); color:var(--accent-contrast); border:1px solid var(--accent) }
+  .url-btn.secondary{ background:transparent; color:var(--text); border:1px solid var(--border) }
+  .url-btn.secondary:hover{ background:var(--hover) }
+
   /* ---------- Rendered Markdown ---------- */
   .markdown-body>:first-child{margin-top:0}
   .markdown-body>:last-child{margin-bottom:0}
@@ -319,6 +336,19 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
       <p class="empty-title">Drop a Markdown file to view</p>
       <p class="empty-sub">Drag &amp; drop anywhere, paste, or tap to open. Accepts .md, .markdown, .mdx, .txt, .rst, .adoc.</p>
+    </div>
+  </section>
+  <section id="urlError" class="url-card" role="alert" hidden>
+    <div class="url-card-inner">
+      <div class="url-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      </div>
+      <p id="urlErrorTitle" class="url-error-title">Could not load Markdown</p>
+      <p id="urlErrorMsg" class="url-error-msg"></p>
+      <div class="url-actions">
+        <button type="button" id="urlRetryBtn" class="url-btn primary">Retry</button>
+        <button type="button" id="urlDismissBtn" class="url-btn secondary">Open local file</button>
+      </div>
     </div>
   </section>
   <article id="content" class="markdown-body" hidden></article>
