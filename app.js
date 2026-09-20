@@ -189,12 +189,12 @@
   });
 
   // Footer close (session)
-  doc.getElementById("footerClose").addEventListener("click", function(){ footerEl.hidden = true; });
+  doc.getElementById("footerClose")?.addEventListener("click", function(){ footerEl.hidden = true; });
 
   // ---------- Family nav (hamburger flyout) ----------
   var btnMenu = doc.getElementById("btnMenu"), navBackdrop = doc.getElementById("navBackdrop");
   function setNav(open){ body.classList.toggle("nav-open", open); btnMenu.setAttribute("aria-expanded", open ? "true" : "false"); }
-  btnMenu.addEventListener("click", function(){ setNav(!body.classList.contains("nav-open")); });
+  btnMenu?.addEventListener("click", function(){ setNav(!body.classList.contains("nav-open")); });
   navBackdrop.addEventListener("click", function(){ setNav(false); });
   doc.addEventListener("keydown", function(e){
     if (!doc.getElementById("routeCard").hidden){   // route card is modal (§6.10): Escape dismisses, Tab cycles its two buttons
