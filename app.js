@@ -51,6 +51,7 @@
   // bottom of this script), and that path must stay textContent-only.
   function syncQueryName(name){
     var url = new URL(location.href);
+    if (url.searchParams.has("url")) return;
     if (name) url.searchParams.set("name", name);
     else url.searchParams.delete("name");
     history.replaceState(null, "", url.pathname + url.search + url.hash);
@@ -562,6 +563,15 @@
     return raw;
   }
 
+  function getQueryUrl(){
+    try {
+      var val = new URLSearchParams(location.search).get("url");
+      return val ? val.trim() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function showUrlError(title, msg){
     isReadonly = true;
     body.classList.add("readonly-mode");
@@ -643,7 +653,9 @@
       if (urlError) urlError.hidden = true;
       empty.hidden = false;
       clearAll();
-      history.replaceState(null, "", location.pathname + location.search);
+      var cleanUrl = new URL(location.href);
+      cleanUrl.searchParams.delete("url");
+      history.replaceState(null, "", cleanUrl.pathname + (cleanUrl.search ? cleanUrl.search : ""));
     });
   }
 
@@ -662,9 +674,9 @@
   // fetches or renders anything on the strength of it. Skipped when an
   // #fvh hand-off is already customizing the same element.
   if (!fvh && !rawText){
-    var hashUrl = getHashUrl();
-    if (hashUrl){
-      loadFromUrl(hashUrl);
+    var targetUrl = getHashUrl() || getQueryUrl();
+    if (targetUrl){
+      loadFromUrl(targetUrl);
     } else {
       var qName = new URLSearchParams(location.search).get("name");
       if (qName){

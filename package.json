@@ -4,7 +4,10 @@
   "private": true,
   "description": "Single-file markdown viewer (static, no build step). This package.json exists only for the CI harness tooling.",
   "scripts": {
-    "test": "node test/harness.mjs",
+    "start": "node server.js",
+    "test:unit": "node --test test/*.test.mjs",
+    "test:e2e": "node test/harness.mjs",
+    "test": "node --test test/*.test.mjs && node test/harness.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {

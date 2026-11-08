@@ -6,6 +6,7 @@ import http from "node:http";
 import { readFileSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getRemoteMetadata, injectMetadata } from "../server/metadata.js";
 
 const ROOT = process.cwd();
 const PORT = Number(process.env.PORT) || 8099;
@@ -58,8 +59,9 @@ const MIME = {
 };
 const mime = (p) => MIME[p.slice(p.lastIndexOf("."))] || "application/octet-stream";
 
-const server = http.createServer((req, res) => {
-  let p = decodeURIComponent((req.url || "/").split("?")[0]);
+const server = http.createServer(async (req, res) => {
+  const parsed = new URL(req.url || "/", `http://localhost:${PORT}`);
+  let p = decodeURIComponent(parsed.pathname);
   if (p === "/fixtures/remote.md") {
     res.writeHead(200, { ...H, "Content-Type": "text/markdown; charset=utf-8", "Access-Control-Allow-Origin": "*" });
     res.end("# Remote Markdown\n\n![diagram](./assets/diag.png)\n\n[Another doc](./sub/other.md)\n\n[External](https://example.com)\n");
@@ -68,6 +70,19 @@ const server = http.createServer((req, res) => {
   if (p === "/fixtures/404.md") {
     res.writeHead(404, { ...H, "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
     res.end("Not Found");
+    return;
+  }
+  if (p === "/" || p === "/index.html") {
+    let html = readFileSync(join(ROOT, "index.html"), "utf8");
+    const targetUrl = parsed.searchParams.get("url");
+    if (targetUrl) {
+      const meta = await getRemoteMetadata(targetUrl, fetch, { allowTestLoopback: true });
+      if (meta) {
+        html = injectMetadata(html, { ...meta, url: `https://markdown-viewer.us/?url=${encodeURIComponent(targetUrl)}` });
+      }
+    }
+    res.writeHead(200, { ...H, "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
     return;
   }
   if (p.endsWith("/")) p += "index.html";
@@ -328,6 +343,39 @@ check("#url= error dismiss: resets to empty state and clears readonly", await pE
 }));
 
 await ctxErr.close();
+
+// -- ?url= query parameter OpenGraph SSR injection and browser rendering
+const queryShareUrl = `http://localhost:${PORT}/?url=${encodeURIComponent(remoteDocUrl)}`;
+const ssrRes = await fetch(queryShareUrl);
+const ssrHtml = await ssrRes.text();
+check("?url= SSR: og:title contains document heading", ssrHtml.includes('<meta property="og:title" content="Remote Markdown">'));
+check("?url= SSR: twitter:title contains document heading", ssrHtml.includes('<meta name="twitter:title" content="Remote Markdown">'));
+check("?url= SSR: og:image contains diagram image", ssrHtml.includes('<meta property="og:image" content="http://localhost:'));
+
+const ctxQuery = await browser.newContext();
+const pQuery = await ctxQuery.newPage();
+hook(pQuery);
+await pQuery.goto(queryShareUrl, { waitUntil: "load", timeout: 30000 });
+await pQuery.waitForFunction(() => document.body.classList.contains("viewing"), null, { timeout: 10000 });
+
+check("?url=: content renders", await pQuery.evaluate(() => {
+  const h1 = document.querySelector("#content h1");
+  return h1 && h1.textContent === "Remote Markdown";
+}));
+
+check("?url=: title derived from URL filename", await pQuery.evaluate(() => {
+  return document.getElementById("docTitle").textContent === "remote.md";
+}));
+
+check("?url=: address bar preserves ?url= query param", await pQuery.evaluate(() => {
+  return location.search.includes("url=") && !location.search.includes("name=");
+}));
+
+check("?url=: readonly mode active on body", await pQuery.evaluate(() => {
+  return document.body.classList.contains("readonly-mode");
+}));
+
+await ctxQuery.close();
 
 
 // -- static assertions
