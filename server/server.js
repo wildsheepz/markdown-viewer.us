@@ -64,12 +64,21 @@ export function createServer(options = {}) {
         let html = readFileSync(indexPath, "utf8");
 
         const targetUrl = parsedUrl.searchParams.get("url");
+        const qName = parsedUrl.searchParams.get("name");
         if (targetUrl) {
           const meta = await getRemoteMetadata(targetUrl, fetchFn, { allowTestLoopback });
           if (meta) {
             const canonicalUrl = `https://markdown-viewer.us/?url=${encodeURIComponent(targetUrl)}`;
             html = injectMetadata(html, { ...meta, url: canonicalUrl });
           }
+        } else if (qName) {
+          const canonicalUrl = `https://markdown-viewer.us/?name=${encodeURIComponent(qName)}`;
+          html = injectMetadata(html, {
+            title: qName,
+            description: `Shared Markdown document: ${qName}`,
+            image: "https://markdown-viewer.us/og.png",
+            url: canonicalUrl,
+          });
         }
 
         res.writeHead(200, {

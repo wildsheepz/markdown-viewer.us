@@ -674,9 +674,18 @@
   // fetches or renders anything on the strength of it. Skipped when an
   // #fvh hand-off is already customizing the same element.
   if (!fvh && !rawText){
-    var targetUrl = getHashUrl() || getQueryUrl();
+    var hashUrl = getHashUrl();
+    var queryUrl = getQueryUrl();
+    var targetUrl = hashUrl || queryUrl;
     if (targetUrl){
       loadFromUrl(targetUrl);
+      if (hashUrl && !queryUrl){
+        var normUrl = new URL(location.href);
+        normUrl.searchParams.set("url", hashUrl);
+        normUrl.searchParams.delete("name");
+        normUrl.hash = "";
+        history.replaceState(null, "", normUrl.pathname + normUrl.search);
+      }
     } else {
       var qName = new URLSearchParams(location.search).get("name");
       if (qName){

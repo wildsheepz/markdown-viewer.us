@@ -161,9 +161,22 @@ export function extractMetadata(markdownText, targetUrl) {
   // First non-empty paragraph for description
   for (const para of bodyParagraphs) {
     const cleaned = stripMarkdown(para);
+    if (/^(?:source|url|link):\s*https?:\/\//i.test(cleaned) || /^keywords\b/i.test(cleaned)) {
+      continue;
+    }
     if (cleaned.length > 0) {
       description = cleaned.length > 200 ? cleaned.slice(0, 197).trim() + "…" : cleaned;
       break;
+    }
+  }
+  // Fallback to any non-empty paragraph if all were metadata
+  if (!description) {
+    for (const para of bodyParagraphs) {
+      const cleaned = stripMarkdown(para);
+      if (cleaned.length > 0) {
+        description = cleaned.length > 200 ? cleaned.slice(0, 197).trim() + "…" : cleaned;
+        break;
+      }
     }
   }
 

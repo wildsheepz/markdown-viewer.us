@@ -107,3 +107,21 @@ test("server: serves static assets like app.js and icons", async () => {
     await close(appServer);
   }
 });
+
+test("server: injects fallback metadata when ?name= is present without ?url=", async () => {
+  const appServer = createServer();
+  const baseUrl = await listen(appServer);
+
+  try {
+    const res = await fetch(baseUrl + "/?name=my-article.md");
+    assert.equal(res.status, 200);
+    const body = await res.text();
+
+    assert.ok(body.includes("<title>my-article.md — Markdown Viewer</title>"));
+    assert.ok(body.includes('<meta property="og:title" content="my-article.md">'));
+    assert.ok(body.includes('<meta property="og:description" content="Shared Markdown document: my-article.md">'));
+  } finally {
+    await close(appServer);
+  }
+});
+
